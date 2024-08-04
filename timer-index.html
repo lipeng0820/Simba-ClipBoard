@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>场记板工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 0;
+        }
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background-color: #f0f0f0;
+            z-index: 1000;
+            padding: 10px 0;
+        }
+        #timecode {
+            font-size: 72px;
+            margin: 20px 0;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+        #onair {
+            font-size: 36px;
+            color: red;
+            animation: blink 1s infinite;
+            display: none;
+            font-weight: bold;
+        }
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+        .log-container {
+            margin-top: 300px; /* Adjust based on your header height */
+            padding: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+        th {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 300px; /* Adjust based on your header height */
+        }
+        .button-group {
+            margin: 10px 0;
+        }
+        .button-group button {
+            margin: 0 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>场记板工具</h1>
+        <div class="button-group">
+            <button id="startBtn">开始</button>
+            <button id="pauseBtn" disabled>暂停</button>
+            <button id="stopBtn" disabled>停止</button>
+            <button id="markBtn" disabled>Mark</button>
+            <button id="exportBtn">导出CSV</button>
+            <button id="resetTimecodeBtn">重置时间码</button>
+            <button id="resetAllBtn">重置所有场记</button>
+        </div>
+        <div id="timecode">00:00:00:00</div>
+        <div id="onair">OnAir</div>
+    </div>
+    <div class="log-container">
+        <div id="log">
+            <table id="logTable">
+                <thead>
+                    <tr>
+                        <th>时间码</th>
+                        <th>备注</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let startTime, pauseTime = 0, timerId;
+        let isRunning = false, isPaused = true;
+        const startBtn = document.getElementById('startBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const markBtn = document.getElementById('markBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const resetTimecodeBtn = document.getElementById('resetTimecodeBtn');
+        const resetAllBtn = document.getElementById('resetAllBtn');
+        const timecodeEl = document.getElementById('timecode');
+        const onairEl = document.getElementById('onair');
+        const logTableBody = document.querySelector('#logTable tbody');
+
+        startBtn.addEventListener('click', startRecording);
+        pauseBtn.addEventListener('click', togglePause);
+        stopBtn.addEventListener('click', stopRecording);
+        markBtn.addEventListener('click', markTimecode);
+        exportBtn.addEventListener('click', exportToCSV);
+        resetTimecodeBtn.addEventListener('click', resetTimecode);
+        resetAllBtn.addEventListener('click', resetAll);
+
+        // Load saved state
+        window.onload = function() {
+            const savedState = JSON.parse(localStorage.getItem('clapperboardState') || '{}');
+            if (savedState.timecode) {
+                timecodeEl.textContent = savedState.timecode;
+                pauseTime = savedState.pauseTime || 0;
+                isPaused = true;
+                pauseBtn.textContent = '继续';
+                pauseBtn.disabled = false;
+                markBtn.disabled = false;
+            }
+            loadLog();
+        };
+
+        function startRecording() {
+            if (!isRunning) {
+                startTime = Date.now() - pauseTime;
+                isRunning = true;
+                isPaused = false;
+                timecodeEl.style.color = 'red';
+                onairEl.style.display = 'block';
+                startBtn.disabled = true;
+                pauseBtn.disabled = false;
+                stopBtn.disabled = false;
+                markBtn.disabled = false;
+                pauseBtn.textContent = '暂停';
+
+                timerId = setInterval(updateTimecode, 40);
+            }
+        }
+
+        function togglePause() {
+            if (isRunning || isPaused) {
+                if (isPaused) {
+                    // Resume
+                    startTime = Date.now() - pauseTime;
+                    timerId = setInterval(updateTimecode, 40);
+                    pauseBtn.textContent = '暂停';
+                    isPaused = false;
+                    isRunning = true;
+                } else {
+                    // Pause
+                    clearInterval(timerId);
+                    pauseTime = Date.now() - startTime;
+                    pauseBtn.textContent = '继续';
+                    isPaused = true;
+                    isRunning = false;
+                }
+                saveState();
+            }
+        }
+
+        function stopRecording() {
+            if (isRunning || isPaused) {
+                clearInterval(timerId);
+                isRunning = false;
+                isPaused = true;
+                timecodeEl.style.color = 'black';
+                onairEl.style.display = 'none';
+                startBtn.disabled = false;
+                pauseBtn.disabled = true;
+                stopBtn.disabled = true;
+                pauseBtn.textContent = '暂停';
+                saveState();
+            }
+        }
+
+        function updateTimecode() {
+            const elapsed = Date.now() - startTime;
+            const hours = Math.floor(elapsed / 3600000);
+            const minutes = Math.floor((elapsed % 3600000) / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            const frames = Math.floor((elapsed % 1000) / 40);
+
+            timecodeEl.textContent = 
+                `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+            saveState();
+        }
+
+        function markTimecode() {
+            const currentTimecode = timecodeEl.textContent;
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${currentTimecode}</td>
+                <td><input type="text" placeholder="输入备注..." oninput="saveLog()"></td>
+                <td><button onclick="deleteLog(this)">删除</button></td>
+            `;
+
+            // 插入新行并保持排序
+            const rows = Array.from(logTableBody.rows);
+            const insertIndex = rows.findIndex(r => r.cells[0].textContent > currentTimecode);
+            if (insertIndex === -1) {
+                logTableBody.appendChild(row);
+            } else {
+                logTableBody.insertBefore(row, rows[insertIndex]);
+            }
+
+            saveLog();
+        }
+
+        function deleteLog(button) {
+            const row = button.closest('tr');
+            logTableBody.removeChild(row);
+            saveLog();
+        }
+
+        function saveLog() {
+            const logs = Array.from(logTableBody.rows).map(row => ({
+                timecode: row.cells[0].textContent,
+                note: row.cells[1].querySelector('input').value
+            }));
+            localStorage.setItem('clapperboardLogs', JSON.stringify(logs));
+        }
+
+        function loadLog() {
+            const logs = JSON.parse(localStorage.getItem('clapperboardLogs') || '[]');
+            logs.forEach(log => {
+                const row = logTableBody.insertRow();
+                row.innerHTML = `
+                    <td>${log.timecode}</td>
+                    <td><input type="text" value="${log.note}" oninput="saveLog()"></td>
+                    <td><button onclick="deleteLog(this)">删除</button></td>
+                `;
+            });
+        }
+
+        function exportToCSV() {
+            const logs = Array.from(logTableBody.rows).map(row => ({
+                timecode: row.cells[0].textContent,
+                note: row.cells[1].querySelector('input').value
+            }));
+
+            let csvContent = "data:text/csv;charset=utf-8,时间码,备注\n";
+            logs.forEach(function(log) {
+                csvContent += log.timecode + "," + log.note.replace(/,/g, ";") + "\n";
+            });
+
+            var encodedUri = encodeURI(csvContent);
+            var link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "场记板日志.csv");
+            document.body.appendChild(link);
+            link.click();
+        }
+
+        function resetTimecode() {
+            startTime = Date.now();
+            pauseTime = 0;
+            timecodeEl.textContent = "00:00:00:00";
+            saveState();
+        }
+
+        function resetAll() {
+            if (confirm("所有场记内容都将清除，此操作不可逆！请提前导出场记内容。")) {
+                logTableBody.innerHTML = '';
+                localStorage.removeItem('clapperboardLogs');
+                localStorage.removeItem('clapperboardState');
+                resetTimecode();
+            }
+        }
+
+        function saveState() {
+            localStorage.setItem('clapperboardState', JSON.stringify({
+                timecode: timecodeEl.textContent,
+                pauseTime: pauseTime
+            }));
+        }
+
+    </script>
+</body>
+</html>
